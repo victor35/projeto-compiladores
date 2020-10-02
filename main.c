@@ -1,416 +1,235 @@
-/*
-
-Mais expressões: Variáveis, funções, tokens multi-caracter, espaços...
-
-O código abaixo foi escrito por Felipo Soranz e é uma adaptação
-
-do código original em Pascal escrito por Jack W. Crenshaw em sua
-
-série "Let's Build a Compiler".
-
-Este código é de livre distribuição e uso.
-
-*/
-
- 
-
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
 
-#define MAXNAME 30
-#define MAXNUM 5
-
- 
+#define MAXVAR 26
 
 char look; /* O caracter lido "antecipadamente" (lookahead) */
 
- 
+int var[MAXVAR];
+
 /* protótipos */
-
 void init();
-void nextChar();
-void error(char *fmt, ...);
-void fatal(char *fmt, ...);
-void expected(char *fmt, ...);
-void skipWhite();
+void nextchar();
+void error(char *s);
+void fatal(char *s);
+void expected(char *s);
 void match(char c);
-void getName(char *name);
-void getNum(char *num);
-void emit(char *fmt, ...);
-int isAddOp(char c);
-void ident();
-void factor();
-void multiply();
-void divide();
-void term();
-void add();
-void subtract();
-void expression();
+char getname();
+int getnum();
+
+void initvar();
+void newline();
+
+int factor();
+int term();
+int expression();
 void assignment();
-
- 
-
-/* PROGRAMA PRINCIPAL */
+void input();
+void output();
 
 int main()
 {
- init();
- assignment();
+	init();
+        do {
+		switch (look) {
+		  case '?':
+		  	input();
+		  	break;
+		  case '!':
+		  	output();
+		  	break;
+		  default:
+		       	assignment();
+		       	break;
+		}
+        	newline();
+        } while (look != '.');
 
- if (look != '\n')
-  expected("NewLine");
-
- return 0;
-
+	return 0;
 }
 
-/* inicialização do compilador */
 void init()
 {
- nextChar();
- skipWhite();
+        initvar();
+	nextchar();
 }
 
-/* lê próximo caracter da entrada */
-void nextChar()
+void nextchar()
 {
- look = getchar();
+	look = getchar();
 }
 
-/* exibe uma mensagem de erro formatada */
-void error(char *fmt, ...)
+void error(char *s)
 {
-
- va_list args;
- fputs("Error: ", stderr);
- va_start(args, fmt);
- vfprintf(stderr, fmt, args);
- va_end(args);
- fputc('\n', stderr);
-
+	fprintf(stderr, "Error: %s\n", s);
 }
-/* exibe uma mensagem de erro formatada e sai */
-void fatal(char *fmt, ...)
+
+void fatal(char *s)
 {
- va_list args;
- fputs("Error: ", stderr);
- va_start(args, fmt);
- vfprintf(stderr, fmt, args);
- va_end(args);
- fputc('\n', stderr);
-
- exit(1);
-
+	error(s);
+	exit(1);
 }
 
- 
-
-/* alerta sobre alguma entrada esperada */
-
-void expected(char *fmt, ...)
+void expected(char *s)
 {
- va_list args;
- fputs("Error: ", stderr);
- va_start(args, fmt);
- vfprintf(stderr, fmt, args);
- va_end(args);
- fputs(" expected!\n", stderr);
-
- exit(1);
-
+	fprintf(stderr, "Error: %s expected\n", s);
+	exit(1);
 }
-/* pula caracteres de espaço */
-void skipWhite()
-{
- while (look == ' ' || look == '\t')
-  nextChar();
-}
-/* verifica se entrada combina com o esperado */
+
 void match(char c)
 {
- if (look != c)
-  expected("'%c'", c);
-  nextChar();
-  skipWhite();
+	char s[2];
+
+	if (look == c)
+		nextchar();
+	else {
+		s[0] = c; /* uma conversao rápida (e feia) */
+		s[1] = '\0'; /* de um caracter em string */
+		expected(s);
+	}
 }
 
-/* recebe o nome de um identificador */
-void getName(char *name)
+char getname()
 {
- int i;
+	char name;
 
- if (!isalpha(look))
-  expected("Name");
+	if (!isalpha(look))
+		expected("Name");
+	name = toupper(look);
+	nextchar();
 
- for (i = 0; isalnum(look); i++) {
-  if (i >= MAXNAME)
-   fatal("Identifier too long!");
- 
- name[i] = toupper(look);
-
-  nextChar();
-
- }
-
- name[i] = '\0';
-
- skipWhite();
-
+	return name;
 }
 
- 
-
-/* recebe um número inteiro */
-
-void getNum(char *num)
-
+int getnum()
 {
+	int i;
 
+	i = 0;
+
+	if (!isdigit(look))
+		expected("Integer");
+
+	while (isdigit(look)) {
+		i *= 10;
+		i += look - '0';
+		nextchar();
+	}
+	
+        return i;
+}
+
+int isaddop(char c)
+{
+        return (c == '+' || c == '-');
+}
+
+int ismulop(char c)
+{
+        return (c == '*' || c == '/');
+}
+
+void initvar()
+{
+	int i;
+
+	for (i = 0; i < MAXVAR; i++)
+		var[i] = 0;
+}
+
+void newline()
+{
+	if (look == '\n')
+		nextchar();
+}
+
+int factor()
+{
         int i;
 
- if (!isdigit(look))
-
-  expected("Integer");
-
- for (i = 0; isdigit(look); i++) {
-
-  if (i >= MAXNUM)
-
-   fatal("Integer too long!");
-
-  num[i] = look;
-
-  nextChar();
-
- }
-
- num[i] = '\0';
-
- skipWhite();
-
-}
-
- 
-
-/* emite uma instrução seguida por uma nova linha */
-
-void emit(char *fmt, ...)
-
-{
-
- va_list args;
-
- putchar('\t');
-
- va_start(args, fmt);
-
- vprintf(fmt, args);
-
- va_end(args);
-
- putchar('\n');
-
-}
-
- 
-
-/* reconhece operador aditivo */
-
-int isAddOp(char c)
-
-{
-
-        return (c == '+' || c == '-');
-
-}
-
- 
-
-/* analisa e traduz um identificador */
-
-void ident()
-
-{
-
-        char name[MAXNAME+1];
-
-        getName(name);
-
         if (look == '(') {
-
                 match('(');
-
+                i = expression();
                 match(')');
+        } else if (isalpha(look))
+        	i = var[getname() - 'A'];
+        else
+                i = getnum();
 
-                emit("CALL %s", name);
-
-        } else
-
-                emit("MOV AX, [%s]", name);
-
+        return i;
 }
 
- 
-
-/* analisa e traduz um fator */
-
-void factor()
-
+int term()
 {
+        int i;
 
-        char num[MAXNUM+1];
-
-        if (look == '(') {
-
-                match('(');
-
-                expression();
-
-                match(')');
-
-        } else if(isalpha(look)) {
-
-                ident();
-
- } else {
-
-                getNum(num);
-
-         emit("MOV AX, %s", num);
-
+        i = factor();
+        while (ismulop(look)) {
+                switch (look) {
+                  case '*':
+                        match('*');
+                        i *= factor();
+                        break;
+                  case '/':
+                        match('/');
+                        i /= factor();
+                }
         }
 
+        return i;
 }
 
- 
-
-/* reconhece e traduz uma multiplicação */
-
-void multiply()
-
+int expression()
 {
+	int i;
 
-        match('*');
+	if (isaddop(look))
+		i = 0;
+	else
+		i = term();
 
-        factor();
-
-       emit("POP BX");
-
-        emit("IMUL BX");
-
+	while (isaddop(look)) {
+		switch (look) {
+		  case '+':
+		  	match('+');
+		  	i += term();
+		  	break;
+		  case '-':
+		  	match('-');
+		  	i -= term();
+		  	break;
+		}
+	}
+	
+	return i;
 }
-
- 
-
-/* reconhece e traduz uma divisão */
-
-void divide()
-
-{
-
-        match('/');
-
-        factor();
-
-       emit("POP BX");
-
-        emit("XCHG AX, BX");
-
-        emit("CWD");
-
-        emit("IDIV BX");
-
-}
-
- 
-
-/* analisa e traduz um termo */
-
-void term()
-
-{
-
- factor();
-
- while (look == '*' || look == '/') {
-
-  emit("PUSH AX");
-
-  switch(look) {
-
-    case '*':
-
-     multiply();
-
-     break;
-
-    case '/':
-
-     divide();
-
-     break;
-
-  }
-
- }
-
-}
-
-/* reconhece e traduz uma adição */
-void add()
-{
-        match('+');
-        term();
-        emit("POP BX");
-        emit("ADD AX, BX");
-}
-/* reconhece e traduz uma subtração */
-void subtract()
-{
-        match('-');
-        term();
-        emit("POP BX");
-        emit("SUB AX, BX");
-        emit("NEG AX");
-
-}
-/* analisa e traduz uma expressão */
-void expression()
-{
-        if (isAddOp(look))
-                emit("XOR AX, AX");
-        else
-         term();
-
- while (isAddOp(look)) {
-
-  emit("PUSH AX");
-
-  switch(look) {
-
-    case '+':
-
-     add();
-
-     break;
-
-    case '-':
-
-     subtract();
-
-     break;
-  }
- }
-}
-/* analisa e traduz um comando de atribuição */
 
 void assignment()
 {
- char name[MAXNAME+1];
- getName(name);
- match('=');
- expression();
- emit("MOV [%s], AX", name);
+	char name;
+	
+	name = getname();
+	match('=');
+	var[name - 'A'] = expression();
+}
 
+void input()
+{
+	char name;
+        char buffer[20];
+	
+	match('?');
+	name = getname();
+	printf("%c? ", name);
+        fgets(buffer, 20, stdin);
+        var[name - 'A'] = atoi(buffer);
+}
+
+void output()
+{
+	char name;
+	
+	match('!');
+	name = getname();
+	printf("%c -> %d\n", name, var[name - 'A']);
 }
