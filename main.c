@@ -1,11 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MAXVAR 26
-
 char look; /* O caracter lido "antecipadamente" (lookahead) */
-
-int var[MAXVAR];
+int lblcount; /* indica o rótulo atual */
 
 /* protótipos */
 void init();
@@ -15,42 +12,37 @@ void fatal(char *s);
 void expected(char *s);
 void match(char c);
 char getname();
-int getnum();
+char getnum();
+int isaddop(char c);
+int ismulop(char c);
 
-void initvar();
-void newline();
+int newlabel();
 
-int factor();
-int term();
-int expression();
-void assignment();
-void input();
-void output();
+void other();
+void program();
+void condition();
+void expression();
+
+void doif(int l);
+void dowhile();
+void doloop();
+void dorepeat();
+void dofor();
+void dodo();
+void dobreak(int l);
+void block(int l);
 
 int main()
 {
 	init();
-        do {
-		switch (look) {
-		  case '?':
-		  	input();
-		  	break;
-		  case '!':
-		  	output();
-		  	break;
-		  default:
-		       	assignment();
-		       	break;
-		}
-        	newline();
-        } while (look != '.');
+        program();
 
 	return 0;
 }
 
 void init()
 {
-        initvar();
+        lblcount = 0;
 	nextchar();
 }
 
@@ -101,22 +93,16 @@ char getname()
 	return name;
 }
 
-int getnum()
+char getnum()
 {
-	int i;
-
-	i = 0;
+	char num;
 
 	if (!isdigit(look))
 		expected("Integer");
+	num = look;
+	nextchar();
 
-	while (isdigit(look)) {
-		i *= 10;
-		i += look - '0';
-		nextchar();
-	}
-	
-        return i;
+        return num;
 }
 
 int isaddop(char c)
@@ -129,107 +115,187 @@ int ismulop(char c)
         return (c == '*' || c == '/');
 }
 
-void initvar()
+int newlabel()
 {
-	int i;
-
-	for (i = 0; i < MAXVAR; i++)
-		var[i] = 0;
+	return lblcount++;
 }
 
-void newline()
+void other()
 {
-	if (look == '\n')
-		nextchar();
+        printf("\t## %c ##\n", getname());
 }
 
-int factor()
+void program()
 {
-        int i;
-
-        if (look == '(') {
-                match('(');
-                i = expression();
-                match(')');
-        } else if (isalpha(look))
-        	i = var[getname() - 'A'];
-        else
-                i = getnum();
-
-        return i;
+	block(-1);
+        match('e');
+	printf("\tint 20h\n");
 }
 
-int term()
+void condition()
 {
-        int i;
-
-        i = factor();
-        while (ismulop(look)) {
-                switch (look) {
-                  case '*':
-                        match('*');
-                        i *= factor();
-                        break;
-                  case '/':
-                        match('/');
-                        i /= factor();
-                }
-        }
-
-        return i;
+	printf("\t## condition ##\n");
 }
 
-int expression()
+void expression()
 {
-	int i;
+	printf("\t## EXPR ##\n");
+}
 
-	if (isaddop(look))
-		i = 0;
-	else
-		i = term();
-
-	while (isaddop(look)) {
-		switch (look) {
-		  case '+':
-		  	match('+');
-		  	i += term();
-		  	break;
-		  case '-':
-		  	match('-');
-		  	i -= term();
-		  	break;
-		}
-	}
+void doif(int l)
+{
+	int l1, l2;
 	
-	return i;
+	match('i');
+	condition();
+	l1 = newlabel();
+	l2 = l1;
+	printf("\tjz L%d\n", l1);
+	block(l);
+	if (look == 'l') {
+		match('l');
+		l2 = newlabel();
+		printf("\tjmp L%d\n", l2);
+		printf("L%d:\n", l1);
+		block(l);
+	}
+	match('e');
+	printf("L%d:\n", l2);
 }
 
-void assignment()
+void dowhile()
 {
+	int l1, l2;
+	
+	match('w');
+	l1 = newlabel();
+	l2 = newlabel();
+	printf("L%d:\n", l1);
+	condition();
+	printf("\tjz L%d\n", l2);
+	block(l2);
+	match('e');
+	printf("\tjmp L%d\n", l1);
+	printf("L%d:\n", l2);
+}
+
+void doloop()
+{
+	int l1, l2;
+	
+	match('p');
+	l1 = newlabel();
+	l2 = newlabel();
+	printf("L%d:\n", l1);
+	block(l2);
+	match('e');
+	printf("\tjmp L%d\n", l1);
+	printf("L%d:\n", l2);
+}
+
+
+void dorepeat()
+{
+	int l1, l2;
+	
+	match('r');
+	l1 = newlabel();
+	l2 = newlabel();
+	printf("L%d:\n", l1);
+	block(l2);
+	match('u');
+	condition();
+	printf("\tjz L%d\n", l1);
+        printf("L%d:\n", l2);
+}
+
+void dofor()
+{
+	int l1, l2;
 	char name;
 	
+	match('f');
+	l1 = newlabel();
+	l2 = newlabel();
 	name = getname();
 	match('=');
-	var[name - 'A'] = expression();
+	expression();
+	printf("\tdec ax\n");
+	printf("\tlea bx, [%c]\n", name);
+	printf("\tmov [bx], ax\n");
+	expression();
+	printf("\tpush ax\n");
+	printf("L%d:\n", l1);
+	printf("\tlea bx, [%c]\n", name);
+	printf("\tmov ax, [bx]\n");
+	printf("\tinc ax\n");
+	printf("\tmov [bx], ax\n");
+	printf("\tpop bx\n");
+	printf("\tpush bx\n");
+	printf("\tcmp ax, bx\n");
+	printf("\tjg L%d\n", l2);
+	block(l2);
+	printf("\tjmp L%d\n", l1);
+	printf("L%d:\n", l2);	
+	printf("\tpop ax\n");
 }
 
-void input()
+void dodo()
 {
-	char name;
-        char buffer[20];
+	int l1, l2;
 	
-	match('?');
-	name = getname();
-	printf("%c? ", name);
-        fgets(buffer, 20, stdin);
-        var[name - 'A'] = atoi(buffer);
+	match('d');
+	l1 = newlabel();
+	l2 = newlabel();
+	expression();
+	printf("\tmov cx, ax\n");
+	printf("L%d:\n", l1);
+	printf("\tpush cx\n");
+	block(l2);
+	printf("\tpop cx\n");	
+	printf("\tloop L%d\n", l1);
+	printf("\tpush cx\n");
+	printf("L%d:\n", l2);
+	printf("\tpop cx\n");	
 }
 
-void output()
+void dobreak(int l)
 {
-	char name;
+        match('b');
+        if (l == -1)
+                fatal("No loop to break from");
+        printf("\tjmp L%d\n", l);
+}
+
+void block(int l)
+{
+	int follow;
 	
-	match('!');
-	name = getname();
-	printf("%c -> %d\n", name, var[name - 'A']);
+	follow = 0;
+	
+	while (!follow) {
+		switch (look) {
+		  case 'i':
+		   	doif(l); break;
+		  case 'w':
+		   	dowhile(); break;
+                  case 'p':
+                        doloop(); break;
+                  case 'r':
+                   	dorepeat(); break;
+                  case 'f':
+                        dofor(); break;
+                  case 'd':
+                        dodo(); break;
+                  case 'b':
+                        dobreak(l); break;
+		  case 'e':
+		  case 'l':
+		  case 'u':
+		   	follow = 1;
+		   	break;
+		  default:
+		   	other(); break;
+                }
+	}
 }
