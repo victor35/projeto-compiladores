@@ -2,8 +2,24 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SYMTBL_SZ 1000
+#define KWLIST_SZ 4
+
+char *symtbl[SYMTBL_SZ];
+char *kwlist[KWLIST_SZ] = {"IF", "ELSE", "ENDIF", "END"};
+
+char *kwcode = "ileex";
+
+#define MAXTOKEN 10
+#define MAXNAME 8
+#define MAXNUM 5
+#define MAXOP 2
+
 char look; /* O caracter lido "antecipadamente" (lookahead) */
-int lblcount; /* indica o rótulo atual */
+
+char token;
+char value[MAXTOKEN+1];
+
 
 /* protótipos */
 void init();
@@ -11,34 +27,46 @@ void nextchar();
 void error(char *s);
 void fatal(char *s);
 void expected(char *s);
+void skipwhite();
+void skipcomma();
+void newline();
 void match(char c);
-char getname();
-char getnum();
-int getboolean();
+void getname();
+void getnum();
+void getop();
 int isaddop(char c);
 int ismulop(char c);
-int isboolean(char c);
-int isorop(char c);
-int isrelop(char c);
+int isop(char c);
+void scan();
 
-int newlabel();
-
-void notfactor();
-void boolfactor();
-void boolterm();
-void boolexpression();
-void boolor();
-void boolxor();
-void do_equals();
-void do_notequals();
-void do_greater();
-void do_less();
-void relation();
+int lookup(char *s, char *list[], int size);
 
 int main()
 {
 	init();
-        boolexpression();
+
+        do {
+                scan();
+                switch (token) {
+                  case 'x':
+                        printf("Ident: ");
+                        break;
+                  case '#':
+                        printf("Number: ");
+                        break;
+                  case 'i':
+                  case 'l':
+                  case 'e':
+                  	printf("Keyword: ");
+                        break;
+		  default:
+                        printf("Operator: ");
+                        break;
+                }
+                printf("%s\n", value);
+                if (value[0] == '\n')
+                	newline();
+        } while (strcmp(value, "END") != 0);
 
 	return 0;
 }
@@ -70,6 +98,27 @@ void expected(char *s)
 	exit(1);
 }
 
+void skipwhite()
+{
+	while (look == ' ' || look == '\t')
+		nextchar();
+}
+
+void skipcomma()
+{
+	skipwhite();
+	if (look == ',') {
+		nextchar();
+		skipwhite();
+	}
+}
+
+void newline()
+{
+	if (look == '\n')
+		nextchar();
+}
+
 void match(char c)
 {
 	char s[2];
@@ -83,42 +132,6 @@ void match(char c)
 	}
 }
 
-char getname()
-{
-	char name;
-
-	if (!isalpha(look))
-		expected("Name");
-	name = toupper(look);
-	nextchar();
-
-	return name;
-}
-
-char getnum()
-{
-	char num;
-
-	if (!isdigit(look))
-		expected("Integer");
-	num = look;
-	nextchar();
-
-        return num;
-}
-
-int getboolean()
-{
-	int boolean;
-	
-	if (!isboolean(look))
-		expected("Boolean Literal");
-	boolean = (toupper(look) == 'T');
-	nextchar();
-	
-	return boolean;
-}
-
 int isaddop(char c)
 {
         return (c == '+' || c == '-');
@@ -129,184 +142,89 @@ int ismulop(char c)
         return (c == '*' || c == '/');
 }
 
-int isboolean(char c)
+int isop(char c)
 {
-        char uc;
-
-        uc = toupper(c);
-
-	return (uc == 'T' || uc == 'F');
+	return (strchr("+-*/<>:=", c) != NULL);
 }
 
-int isorop(char c)
+void getname()
 {
-        return (c == '|' || c == '~');
-}
-
-int isrelop(char c)
-{
-	return (strchr("=#<>", c) != NULL);
-}
-
-int newlabel()
-{
-	return lblcount++;
-}
-
-void boolfactor()
-{
-	if (isboolean(look)) {
-		if (getboolean())
-			printf("\tmov ax, -1\n");
-		else
-			printf("\txor ax, ax\n");
-	} else
-		relation();
-}
-
-void notfactor()
-{
-        if (look == '!') {
-                match('!');
-                boolfactor();
-                printf("\tnot ax\n");
-        } else
-                boolfactor();
-}
-
-void boolterm()
-{
-	notfactor();
-	while (look == '&') {
-		printf("\tpush ax\n");
-		match('&');
-		notfactor();
-		printf("\tpop bx\n");
-		printf("\tand ax, bx\n");
+	int i, kw;
+	
+	if (!isalpha(look))
+		expected("Name");
+	for (i = 0; isalnum(look) && i < MAXNAME; i++) {
+		value[i] = toupper(look);
+		nextchar();
 	}
+	value[i] = '\0';
+	kw = lookup(value, kwlist, KWLIST_SZ);
+	if (kw == -1)
+                token = 'x';
+        else
+                token = kwcode[kw];
 }
 
-void boolor()
+void getnum()
 {
-	match('|');
-	boolterm();
-	printf("\tpop bx\n");
-	printf("\tor ax, bx\n");
-}
-
-void boolxor()
-{
-	match('~');
-	boolterm();
-	printf("\tpop bx\n");
-	printf("\txor ax, bx\n");
-}
-
-void boolexpression()
-{
-	boolterm();
-	while (isorop(look)) {
-		printf("\tpush ax\n");
-		switch (look) {
-		  case '|':
-		  	boolor(); break;
-		  case '~' :
-		  	boolxor(); break;
-		}
+	int i;
+	
+	if (!isdigit(look))
+		expected("Integer");
+	for (i = 0; isdigit(look) && i < MAXNUM; i++) {
+		value[i] = look;
+		nextchar();
 	}
+	value[i] = '\0';
+        token = '#';
 }
 
-void expression()
+void getop()
 {
-        // dummy
+        int i;
+
+        if (!isop(look))
+                expected("Operator");
+        for (i = 0; isop(look) && i < MAXOP; i++) {
+                value[i] = look;
+                nextchar();
+        }
+        value[i] = '\0';
+        if (strlen(value) == 1)
+        	token = value[0];
+        else
+        	token = '?';
 }
 
-void do_equals()
+void scan()
 {
-        int l1, l2;
+        int kw;
 
-	match('=');
-        l1 = newlabel();
-        l2 = newlabel();
-	expression();
-	printf("\tpop bx\n");
-	printf("\tcmp bx, ax\n");
-	printf("\tje L%d\n", l1);
-	printf("\txor ax, ax\n");
-	printf("\tjmp L%d\n", l2);
-	printf("L%d:\n", l1);
-	printf("\tmov ax, -1\n");
-	printf("L%d:\n", l2);
-}
-
-void do_notequals()
-{
-        int l1, l2;
-
-	match('#');
-        l1 = newlabel();
-        l2 = newlabel();
-	expression();
-	printf("\tpop bx\n");
-	printf("\tcmp bx, ax\n");
-	printf("\tjne L%d\n", l1);
-	printf("\txor ax, ax\n");
-	printf("\tjmp L%d\n", l2);
-	printf("L%d:\n", l1);
-	printf("\tmov ax, -1\n");
-	printf("L%d:\n", l2);
-}
-
-void do_greater()
-{
-        int l1, l2;
-
-	match('>');
-        l1 = newlabel();
-        l2 = newlabel();
-	expression();
-	printf("\tpop bx\n");
-	printf("\tcmp bx, ax\n");
-	printf("\tjg L%d\n", l1);
-	printf("\txor ax, ax\n");
-	printf("\tjmp L%d\n", l2);
-	printf("L%d:\n", l1);
-	printf("\tmov ax, -1\n");
-	printf("L%d:\n", l2);
-}
-
-void do_less()
-{
-        int l1, l2;
-
-	match('<');
-        l1 = newlabel();
-        l2 = newlabel();
-	expression();
-	printf("\tpop bx\n");
-	printf("\tcmp bx, ax\n");
-	printf("\tjl L%d\n", l1);
-	printf("\txor ax, ax\n");
-	printf("\tjmp L%d\n", l2);
-	printf("L%d:\n", l1);
-	printf("\tmov ax, -1\n");
-	printf("L%d:\n", l2);
-}
-
-void relation()
-{
-	expression();
-	if (isrelop(look)) {
-		printf("\tpush ax\n");
-		switch (look) {
-		  case '=':
-		  	do_equals(); break;
-		  case '#':
-		  	do_notequals(); break;
-		  case '>':
-		  	do_greater(); break;
-		  case '<':
-		  	do_less(); break;
-		}
+        while (look == '\n')
+                newline();
+	if (isalpha(look))
+		getname();
+	else if (isdigit(look))
+		getnum();
+	else if (isop(look))
+		getop();
+	else {
+		value[0] = look;
+		value[1] = '\0';
+		token = '?';
+		nextchar();
 	}
+	skipwhite();
+}
+
+int lookup(char *s, char *list[], int size)
+{
+	int i;
+
+	for (i = 0; i < size; i++) {
+		if (strcmp(list[i], s) == 0)
+			return i;
+	}
+
+	return -1;
 }
