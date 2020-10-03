@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 char look; /* O caracter lido "antecipadamente" (lookahead) */
 int lblcount; /* indica o rótulo atual */
@@ -13,36 +14,37 @@ void expected(char *s);
 void match(char c);
 char getname();
 char getnum();
+int getboolean();
 int isaddop(char c);
 int ismulop(char c);
+int isboolean(char c);
+int isorop(char c);
+int isrelop(char c);
 
 int newlabel();
 
-void other();
-void program();
-void condition();
-void expression();
-
-void doif(int l);
-void dowhile();
-void doloop();
-void dorepeat();
-void dofor();
-void dodo();
-void dobreak(int l);
-void block(int l);
+void notfactor();
+void boolfactor();
+void boolterm();
+void boolexpression();
+void boolor();
+void boolxor();
+void do_equals();
+void do_notequals();
+void do_greater();
+void do_less();
+void relation();
 
 int main()
 {
 	init();
-        program();
+        boolexpression();
 
 	return 0;
 }
 
 void init()
 {
-        lblcount = 0;
 	nextchar();
 }
 
@@ -105,6 +107,18 @@ char getnum()
         return num;
 }
 
+int getboolean()
+{
+	int boolean;
+	
+	if (!isboolean(look))
+		expected("Boolean Literal");
+	boolean = (toupper(look) == 'T');
+	nextchar();
+	
+	return boolean;
+}
+
 int isaddop(char c)
 {
         return (c == '+' || c == '-');
@@ -115,187 +129,184 @@ int ismulop(char c)
         return (c == '*' || c == '/');
 }
 
+int isboolean(char c)
+{
+        char uc;
+
+        uc = toupper(c);
+
+	return (uc == 'T' || uc == 'F');
+}
+
+int isorop(char c)
+{
+        return (c == '|' || c == '~');
+}
+
+int isrelop(char c)
+{
+	return (strchr("=#<>", c) != NULL);
+}
+
 int newlabel()
 {
 	return lblcount++;
 }
 
-void other()
+void boolfactor()
 {
-        printf("\t## %c ##\n", getname());
+	if (isboolean(look)) {
+		if (getboolean())
+			printf("\tmov ax, -1\n");
+		else
+			printf("\txor ax, ax\n");
+	} else
+		relation();
 }
 
-void program()
+void notfactor()
 {
-	block(-1);
-        match('e');
-	printf("\tint 20h\n");
+        if (look == '!') {
+                match('!');
+                boolfactor();
+                printf("\tnot ax\n");
+        } else
+                boolfactor();
 }
 
-void condition()
+void boolterm()
 {
-	printf("\t## condition ##\n");
+	notfactor();
+	while (look == '&') {
+		printf("\tpush ax\n");
+		match('&');
+		notfactor();
+		printf("\tpop bx\n");
+		printf("\tand ax, bx\n");
+	}
+}
+
+void boolor()
+{
+	match('|');
+	boolterm();
+	printf("\tpop bx\n");
+	printf("\tor ax, bx\n");
+}
+
+void boolxor()
+{
+	match('~');
+	boolterm();
+	printf("\tpop bx\n");
+	printf("\txor ax, bx\n");
+}
+
+void boolexpression()
+{
+	boolterm();
+	while (isorop(look)) {
+		printf("\tpush ax\n");
+		switch (look) {
+		  case '|':
+		  	boolor(); break;
+		  case '~' :
+		  	boolxor(); break;
+		}
+	}
 }
 
 void expression()
 {
-	printf("\t## EXPR ##\n");
+        // dummy
 }
 
-void doif(int l)
+void do_equals()
 {
-	int l1, l2;
-	
-	match('i');
-	condition();
-	l1 = newlabel();
-	l2 = l1;
-	printf("\tjz L%d\n", l1);
-	block(l);
-	if (look == 'l') {
-		match('l');
-		l2 = newlabel();
-		printf("\tjmp L%d\n", l2);
-		printf("L%d:\n", l1);
-		block(l);
-	}
-	match('e');
-	printf("L%d:\n", l2);
-}
+        int l1, l2;
 
-void dowhile()
-{
-	int l1, l2;
-	
-	match('w');
-	l1 = newlabel();
-	l2 = newlabel();
-	printf("L%d:\n", l1);
-	condition();
-	printf("\tjz L%d\n", l2);
-	block(l2);
-	match('e');
-	printf("\tjmp L%d\n", l1);
-	printf("L%d:\n", l2);
-}
-
-void doloop()
-{
-	int l1, l2;
-	
-	match('p');
-	l1 = newlabel();
-	l2 = newlabel();
-	printf("L%d:\n", l1);
-	block(l2);
-	match('e');
-	printf("\tjmp L%d\n", l1);
-	printf("L%d:\n", l2);
-}
-
-
-void dorepeat()
-{
-	int l1, l2;
-	
-	match('r');
-	l1 = newlabel();
-	l2 = newlabel();
-	printf("L%d:\n", l1);
-	block(l2);
-	match('u');
-	condition();
-	printf("\tjz L%d\n", l1);
-        printf("L%d:\n", l2);
-}
-
-void dofor()
-{
-	int l1, l2;
-	char name;
-	
-	match('f');
-	l1 = newlabel();
-	l2 = newlabel();
-	name = getname();
 	match('=');
+        l1 = newlabel();
+        l2 = newlabel();
 	expression();
-	printf("\tdec ax\n");
-	printf("\tlea bx, [%c]\n", name);
-	printf("\tmov [bx], ax\n");
-	expression();
-	printf("\tpush ax\n");
-	printf("L%d:\n", l1);
-	printf("\tlea bx, [%c]\n", name);
-	printf("\tmov ax, [bx]\n");
-	printf("\tinc ax\n");
-	printf("\tmov [bx], ax\n");
 	printf("\tpop bx\n");
-	printf("\tpush bx\n");
-	printf("\tcmp ax, bx\n");
-	printf("\tjg L%d\n", l2);
-	block(l2);
-	printf("\tjmp L%d\n", l1);
-	printf("L%d:\n", l2);	
-	printf("\tpop ax\n");
-}
-
-void dodo()
-{
-	int l1, l2;
-	
-	match('d');
-	l1 = newlabel();
-	l2 = newlabel();
-	expression();
-	printf("\tmov cx, ax\n");
+	printf("\tcmp bx, ax\n");
+	printf("\tje L%d\n", l1);
+	printf("\txor ax, ax\n");
+	printf("\tjmp L%d\n", l2);
 	printf("L%d:\n", l1);
-	printf("\tpush cx\n");
-	block(l2);
-	printf("\tpop cx\n");	
-	printf("\tloop L%d\n", l1);
-	printf("\tpush cx\n");
+	printf("\tmov ax, -1\n");
 	printf("L%d:\n", l2);
-	printf("\tpop cx\n");	
 }
 
-void dobreak(int l)
+void do_notequals()
 {
-        match('b');
-        if (l == -1)
-                fatal("No loop to break from");
-        printf("\tjmp L%d\n", l);
+        int l1, l2;
+
+	match('#');
+        l1 = newlabel();
+        l2 = newlabel();
+	expression();
+	printf("\tpop bx\n");
+	printf("\tcmp bx, ax\n");
+	printf("\tjne L%d\n", l1);
+	printf("\txor ax, ax\n");
+	printf("\tjmp L%d\n", l2);
+	printf("L%d:\n", l1);
+	printf("\tmov ax, -1\n");
+	printf("L%d:\n", l2);
 }
 
-void block(int l)
+void do_greater()
 {
-	int follow;
-	
-	follow = 0;
-	
-	while (!follow) {
+        int l1, l2;
+
+	match('>');
+        l1 = newlabel();
+        l2 = newlabel();
+	expression();
+	printf("\tpop bx\n");
+	printf("\tcmp bx, ax\n");
+	printf("\tjg L%d\n", l1);
+	printf("\txor ax, ax\n");
+	printf("\tjmp L%d\n", l2);
+	printf("L%d:\n", l1);
+	printf("\tmov ax, -1\n");
+	printf("L%d:\n", l2);
+}
+
+void do_less()
+{
+        int l1, l2;
+
+	match('<');
+        l1 = newlabel();
+        l2 = newlabel();
+	expression();
+	printf("\tpop bx\n");
+	printf("\tcmp bx, ax\n");
+	printf("\tjl L%d\n", l1);
+	printf("\txor ax, ax\n");
+	printf("\tjmp L%d\n", l2);
+	printf("L%d:\n", l1);
+	printf("\tmov ax, -1\n");
+	printf("L%d:\n", l2);
+}
+
+void relation()
+{
+	expression();
+	if (isrelop(look)) {
+		printf("\tpush ax\n");
 		switch (look) {
-		  case 'i':
-		   	doif(l); break;
-		  case 'w':
-		   	dowhile(); break;
-                  case 'p':
-                        doloop(); break;
-                  case 'r':
-                   	dorepeat(); break;
-                  case 'f':
-                        dofor(); break;
-                  case 'd':
-                        dodo(); break;
-                  case 'b':
-                        dobreak(l); break;
-		  case 'e':
-		  case 'l':
-		  case 'u':
-		   	follow = 1;
-		   	break;
-		  default:
-		   	other(); break;
-                }
+		  case '=':
+		  	do_equals(); break;
+		  case '#':
+		  	do_notequals(); break;
+		  case '>':
+		  	do_greater(); break;
+		  case '<':
+		  	do_less(); break;
+		}
 	}
 }
