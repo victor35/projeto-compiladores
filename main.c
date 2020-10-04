@@ -1,12 +1,3 @@
-/*
-The Cradle - O Berço
-
-O código abaixo foi escrito por Felipo Soranz e é uma adaptação
-do código original em Pascal escrito por Jack E. Crenshaw em sua
-série "Let's Build a Compiler".
-
-Este código é de livre distribuição e uso.
-*/
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,9 +16,24 @@ char getnum();
 int isaddop(char c);
 int ismulop(char c);
 
+void prog();
+void prolog();
+void epilog(char name);
+void doblock(char name);
+void declarations();
+void statements();
+
+void labels();
+void constants();
+void types();
+void variables();
+void doprocedure();
+void dofunction();
+
 int main()
 {
 	init();
+        prog();
 
 	return 0;
 }
@@ -111,3 +117,108 @@ void skipwhite()
 	while (look == ' ' || look == '\t')
 		nextchar();
 }
+
+/* analisa e traduz um programa */
+void prog()
+{
+	char name;
+	
+	match('p'); /* trata do cabeçalho do programa */
+	name = getname();
+	prolog();
+        doblock(name);
+	match('.');
+	epilog(name);
+}
+
+void prolog()
+{
+	printf("\t.model small\n");
+	printf("\t.stack\n");
+	printf("\t.code\n");
+        printf("PROG segment byte public\n");
+        printf("\tassume cs:PROG,ds:PROG,es:PROG,ss:PROG\n");
+}
+
+void epilog(char name)
+{
+	printf("exit_prog:\n");
+        printf("\tmov ax,4C00h\n");
+        printf("\tint 21h\n");
+        printf("PROG ends\n");
+        printf("\tend %c\n", name);
+}
+
+/* analisa e traduz um bloco pascal */
+void doblock(char name)
+{
+	declarations();
+	printf("%c:\n", name);
+	statements();
+}
+
+/* analisa e traduz a seção de declaração */
+void declarations()
+{
+	int valid;
+	
+	do {
+		valid = 1;
+		switch (look) {
+		  case 'l':
+		  	labels(); break;
+		  case 'c':
+		  	constants(); break;
+		  case 't':
+		  	types(); break;
+		  case 'v':
+		  	variables(); break;
+		  case 'p':
+		  	doprocedure(); break;
+		  case 'f':
+		  	dofunction(); break;
+		  default:
+		  	valid = 0; break;
+		}
+	} while (valid);
+}
+
+void statements()
+{
+	match('b');
+	while (look != 'e')
+		nextchar();
+	match('e');
+}
+
+void labels()
+{
+	match('l');
+}
+
+void constants()
+{
+	match('c');
+}
+
+void types()
+{
+	match('t');
+}
+
+void variables()
+{
+	match('v');
+}
+
+void doprocedure()
+{
+	match('p');
+}
+
+void dofunction()
+{
+	match('f');
+}
+
+
