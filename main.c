@@ -49,7 +49,8 @@ void addsymbol(char *name, char type);
 
 /* analisador léxico */
 void skipwhite();
-void match(char c);
+void semicolon();
+void skipcomment();
 void getname();
 void getnum();
 void getop();
@@ -126,6 +127,7 @@ int main()
 	init();
 
 	matchstring("PROGRAM");
+	semicolon();
 	header();
 	topdecls();
 	matchstring("BEGIN");
@@ -151,6 +153,7 @@ void nextchar()
 {
 	look = getchar();
 }
+
 
 /* imprime mensagem de erro sem sair */
 void error(char *s)
@@ -220,8 +223,30 @@ int isrelop(char c)
 /* pula caracteres em branco */
 void skipwhite()
 {
-	while (isspace(look))
-		nextchar();
+	while (isspace(look) || look == '{') {
+                if (look == '{')
+                        skipcomment();
+                else
+                        nextchar();
+        }
+}
+
+/* reconhece um ponto-e-vírgula */
+void semicolon()
+{
+	if (token == ';')
+		nexttoken();
+}
+
+/* pula um campo de comentário */
+void skipcomment()
+{
+        while (look != '}') {
+                nextchar();
+                if (look == '{') /* trata comentários aninhados */
+                	skipcomment();
+        }
+        nextchar();
 }
 
 /* procura por string em tabela,
@@ -840,14 +865,16 @@ void block()
 		  case 'W':
 		  	dowrite();
 		  	break;
+		  case 'x':
+		  	assignment();
+		  	break;
 		  case 'e':
 		  case 'l':
 		  	follow = 1;
 		  	break;
-		  default:
-		  	assignment();
-		  	break;
 		}
+		if (!follow)
+                        semicolon();
 	} while (!follow);
 }
 
@@ -871,5 +898,6 @@ void topdecls()
                 do {
                         decl();
                 } while (token == ',');
+                semicolon();
 	}
 }
