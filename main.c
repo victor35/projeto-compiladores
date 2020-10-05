@@ -2,96 +2,79 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 #define SYMTBL_SZ 26
-#define PARAMS_SZ 26
+char symtbl[SYMTBL_SZ]; /* tabela de símbolos */
 
 char look; /* O caracter lido "antecipadamente" (lookahead) */
 
-char symtbl[SYMTBL_SZ]; /* tabela de símbolos */
-int params[PARAMS_SZ]; /* lista de parâmetros formais para os procedimentos */
-
-int nparams; /* número de parâmetros formais */
-
-/* rotinas utilitárias */
+/* protótipos */
 void init();
 void nextchar();
 void error(char *s);
 void fatal(char *s);
 void expected(char *s);
-void undefined(char name);
 void duplicated(char name);
 void unrecognized(char name);
-void notvar(char name);
 
-/* tratamento da tabela de símbolos */
+void dumptable();
 char symtype(char name);
 char intable(char name);
+void checkdup(char name);
 void addsymbol(char name, char type);
-void checkvar(char name);
 
-/* analisador léxico rudimentar */
 int isaddop(char c);
 int ismulop(char c);
+int isorop(char c);
+int isrelop(char c);
 void skipwhite();
 void newline();
 void match(char c);
 char getname();
-char getnum();
+long getnum();
 
-/* geração de código */
-void asm_loadvar(char name);
-void asm_storevar(char name);
-void asm_allocvar(char name);
-void asm_call(char name);
-void asm_return();
-int asm_offsetpar(int par);
-void asm_loadparam(int par);
-void asm_storeparam(int par);
-void asm_push();
-void asm_procprolog(char name);
-void asm_procepilog();
-void header();
-void prolog();
-void epilog();
+int isvartype(char c);
+char vartype(char name);
 
-/* parâmetros formais */
-void clearparams();
-int paramnum(char name);
-int isparam(char name);
-void addparam(char name);
+void asm_allocvar(char name, char type);
+void asm_loadvar(char name, char type);
+void asm_storevar(char name, char type);
+void asm_convert(char src, char dst);
+void asm_loadconst(long val, char type);
+void asm_clear();
+void asm_push(char type);
+void asm_pop(char type);
+void asm_swap(char type);
+char asm_popadd(char t1, char t2);
+char asm_popsub(char t1, char t2);
+char asm_popmul(char t1, char t2);
+char asm_popdiv(char t1, char t2);
 
-/* analisador sintático */
-void expression();
-void assignment(char name);
-void param();
-int paramlist();
-void docallproc(char name);
-void assign_or_proc();
-void doblock();
-void beginblock();
-void formalparam();
-void formallist();
-void doproc();
-void domain();
+void alloc(char name, char type);
+char loadvar(char name);
+void storevar(char name, char srctype);
+char loadnum(long val);
 void decl();
 void topdecls();
+char unop();
+char factor();
+char multiply(char type);
+char divide(char type);
+char term();
+char add(char type);
+char subtract(char type);
+char expression();
+void assignment();
+void block();
 
 /* PROGRAMA PRINCIPAL */
 int main()
 {
-	printf("Content-type: text/plain\n\n");
-	printf("<html>");
-	printf("<head>");
-	printf("</head>");
-	printf("<body>");
-	printf("<h1>funcionou!!!</h1>");
-	printf("</body>");
-	printf("</html>");
 	init();
-        header();
-        topdecls();		
-        epilog();
+        topdecls();
+	match('B');
+	newline();
+	block();
+        dumptable();
 
 	return 0;
 }
@@ -102,9 +85,7 @@ void init()
         int i;
 
         for (i = 0; i < SYMTBL_SZ; i++)
-                symtbl[i] = ' ';
-
-        clearparams();
+                symtbl[i] = '?';
 
         nextchar();
         skipwhite();
@@ -137,13 +118,6 @@ void expected(char *s)
 }
 
 /* avisa a respeito de um identificador desconhecido */
-void undefined(char name)
-{
-	fprintf(stderr, "Error: Undefined identifier %c\n", name);
-	exit(1);
-}
-
-/* avisa a respeito de um identificador desconhecido */
 void duplicated(char name)
 {
 	fprintf(stderr, "Error: Duplicated identifier %c\n", name);
@@ -164,6 +138,18 @@ void notvar(char name)
 	exit(1);
 }
 
+/* exibe a tabela de símbolos */
+void dumptable()
+{
+        int i;
+
+	printf("Symbol table dump:\n");
+
+        for (i = 0; i < SYMTBL_SZ; i++)
+        	if (symtbl[i] != '?')
+                	printf("%c = %c\n", i + 'A', symtbl[i]);
+}
+
 /* retorna o tipo de um identificador */
 char symtype(char name)
 {
@@ -173,24 +159,21 @@ char symtype(char name)
 /* verifica se "name" consta na tabela de símbolos */
 char intable(char name)
 {
-        return (symtbl[name - 'A'] != ' ');
+        return (symtbl[name - 'A'] != '?');
+}
+
+/* verifica se um identificador já foi declarado */
+void checkdup(char name)
+{
+        if (intable(name))
+                duplicated(name);
 }
 
 /* adiciona novo identificador à tabela de símbolos */
 void addsymbol(char name, char type)
 {
-        if (intable(name))
-                duplicated(name);
+	checkdup(name);
         symtbl[name - 'A'] = type;
-}
-
-/* verifica se identificador é variável */
-void checkvar(char name)
-{
-        if (!intable(name))
-                undefined(name);
-        if (symtype(name) != 'v')
-                notvar(name);
 }
 
 /* testa operadores de adição */
@@ -260,332 +243,467 @@ char getname()
 	return name;
 }
 
-/* analisa e traduz um número inteiro */
-char getnum()
+/* analisa e traduz um número inteiro longo */
+long getnum()
 {
-	char num;
-
+	long val;
+	
 	if (!isdigit(look))
 		expected("Integer");
-	num = look;
-	nextchar();
-        skipwhite();
-
-        return num;
+	val = 0;
+	while (isdigit(look)) {
+		val *= 10;
+		val += look - '0';
+		nextchar();
+	}
+	skipwhite();
+	return val;
 }
 
-/* carrega uma variável no reg. prim. */
-void asm_loadvar(char name)
+/* reconhece um tipo de variável válido */
+int isvartype(char c)
 {
-        checkvar(name);
-	printf("\tmov ax, word ptr %c\n", name);
+	return (c == 'b' || c == 'w' || c == 'l');
 }
 
-/* armazena reg. prim. em variável */
-void asm_storevar(char name)
+/* pega o tipo da variável da tabela de símbolos */
+char vartype(char name)
 {
-	printf("\tmov word ptr %c, ax\n", name);
-}
-
-/* aloca espaço de armazenamento para variável */
-void asm_allocvar(char name)
-{
-        addsymbol(name, 'v');
-        printf("%c: dw 0\n", name);
-}
-
-/* gera uma chamada de procedimento */
-void asm_call(char name)
-{
-        printf("\tcall %c\n", name);
-}
-
-/* gera código para retorno de procedimento */
-void asm_return()
-{
-        printf("\tret\n");
-}
-
-int asm_offsetpar(int par)
-{
-	int offset;
+	char type;
 	
-	/* offset = ret_address + param_size * param_pos */
-	offset = 4 + 2 * (nparams - par);
+	type = symtype(name);
+	if (!isvartype(type))
+		notvar(name);
+
+	return type;
+}
+
+/* gera código para armazenamento de variável */
+void asm_allocvar(char name, char type)
+{
+        int btype; /* tamanho em bytes */
+
+        switch (type) {
+          case 'b':
+          case 'w':
+                btype = type;
+                break;
+          case 'l':
+                btype = 'd';
+                break;
+        }
+        printf("%c d%c 0\n", name, btype);
+}
+
+/* gera código para carregar variável de acordo com o tipo */
+void asm_loadvar(char name, char type)
+{
+	switch (type) {
+	  case 'b':
+	  	printf("\tmov al, [%c]\n", name);
+	  	break;
+	  case 'w':
+	  	printf("\tmov ax, [%c]\n", name);
+	  	break;
+	  case 'l':
+  		printf("\tmov dx, word ptr [%c+2]\n", name);
+  		printf("\tmov ax, word ptr [%c]\n", name);
+	}
+}
+
+/* gera código para armazenar variável de acordo com o tipo */
+void asm_storevar(char name, char type)
+{
+	switch (type) {
+	  case 'b':
+	  	printf("\tmov [%c], al\n", name);
+	  	break;
+	  case 'w':
+	  	printf("\tmov [%c], ax\n", name);
+	  	break;
+	  case 'l':
+  		printf("\tmov word ptr [%c+2], dx\n", name);
+  		printf("\tmov word ptr [%c], ax\n", name);
+	}
+}
+
+/* gera código para conversão de tipos no registrador primário */
+void asm_convert(char src, char dst)
+{
+	if (src == dst)
+		return;
 	
-	return offset;
+	if (src == 'b')
+		printf("\tcbw\n");
+	if (dst == 'l')
+		printf("\tcwd\n");
 }
 
-/* carrega parâmetro em registrador primário */
-void asm_loadparam(int par)
+/* carrega constante numérica em registrador primário */
+void asm_loadconst(long val, char type)
 {
-	printf("\tmov ax, word ptr [bp+%d]\n", asm_offsetpar(par));
+	switch (type) {
+	  case 'b':
+		printf("\tmov al, %d\n", (int) val);
+	  	break;
+	  case 'w':
+		printf("\tmov ax, %d\n", (int) val);
+	  	break;
+	  case 'l':
+		printf("\tmov dx, %u\n", val >> 16);
+		printf("\tmov ax, %u\n", val & 0xFFFF);
+	  	break;
+	}
 }
 
-/* armazena conteúdo do reg. prim. em parâmetro */
-void asm_storeparam(int par)
+/* zera registrador primário */
+void asm_clear()
 {
-	printf("\tmov word ptr [bp+%d], ax\n", asm_offsetpar(par));
+        printf("\txor ax, ax\n");
 }
 
-/* coloca reg. prim. na pilha */
-void asm_push()
+/* coloca valor na pilha */
+void asm_push(char type)
 {
+	if (type == 'l')
+		printf("\tpush dx\n");
 	printf("\tpush ax\n");
 }
 
-/* ajusta o ponteiro da pilha acima */
-void asm_cleanstack(int bytes)
+/* coloca em registrador secundário valor da pilha */
+void asm_pop(char type)
 {
-        if (bytes > 0)
-                printf("\tadd sp, %d\n", bytes);
+        printf("\tpop bx\n");
+        if (type == 'l')
+                printf("\tpop cx\n");
 }
 
-/* escreve o prólogo para um procedimento */
-void asm_procprolog(char name)
+/* gera código para trocar registradores primário e secundário */
+void asm_swap(char type)
 {
-	printf("%c:\n", name);
-	printf("\tpush bp\n");
-	printf("\tmov bp, sp\n");
+	switch (type) {
+	  case 'b':
+	  	printf("\txchg al, bl\n");
+	  	break;
+	  case 'w':
+	  	printf("\txchg ax, bx\n");
+	  	break;
+	  case 'l':
+	  	printf("\txchg ax, bx\n");
+	  	printf("\txchg dx, cx\n");
+	  	break;
+	}
 }
 
-/* escreve o epílogo para um procedimento */
-void asm_procepilog()
+/* faz a promoção dos tipos dos operandos e inverte a ordem dos mesmos */
+char asm_sametype(char t1, char t2, int ord_matters)
 {
-	printf("\tpop bp\n");
-	printf("\tret\n");
-}
-
-/* cabeçalho do código assembly */
-void header()
-{
-	printf(".model small\n");
-	printf(".stack\n");
-	printf(".code\n");
-	printf("PROG segment byte public\n");
-	printf("\tassume cs:PROG,ds:PROG,es:PROG,ss:PROG\n");
-}
-
-/* prólogo da rotina principal */
-void prolog()
-{
-	printf("MAIN:\n");
-	printf("\tmov ax, PROG\n");
-	printf("\tmov ds, ax\n");
-	printf("\tmov es, ax\n");
-}
-
-/* epílogo da rotina principal */
-void epilog()
-{
-	printf("\tmov ax,4C00h\n");
-	printf("\tint 21h\n");
-	printf("PROG ends\n");
-	printf("\tend MAIN\n");
-}
-
-/* analisa e traduz uma expressão */
-void expression()
-{
-	char name = getname();
-	if (isparam(name))
-		asm_loadparam(paramnum(name));
-        else
-        	asm_loadvar(name);
-}
-
-/* analisa e traduz um comando de atribuição */
-void assignment(char name)
-{
-        match('=');
-        expression();
-        if (isparam(name))
-                asm_storeparam(paramnum(name));
-        else
-                asm_storevar(name);
-}
-
-/* processa um parâmetro de chamada */
-void param()
-{
-        expression();
-        asm_push();
-}
-
-/* processa a lista de parâmetros para uma chamada de procedimento */
-int paramlist()
-{
-	int i = 0;;
+	int swaped = 0;
+	int type = t1;
 	
-	match('(');
-	if (look != ')') {
-		for (;;) {
-			param();
-			i++;
-			if (look != ',')
-				break;
-			match(',');
+	if (t1 != t2) {
+		if ((t1 == 'b') || (t1 == 'w' && t2 == 'l')) {
+			type = t2;
+			asm_swap(type);
+			asm_convert(t1, t2);
+			swaped = 1;
+		} else {
+			type = t1;
+			asm_convert(t2, t1);
 		}
 	}
-	match(')');
-	
-	return i * 2; /* número de parâmetros * bytes por parâmetro */
+	if (!swaped && ord_matters)
+		asm_swap(type);
+		
+	return type;
 }
 
-/* processa uma chamada de procedimento */
-void docallproc(char name)
+/* soma valor na pilha com valor no reg. primário */
+char asm_popadd(char t1, char t2)
 {
-	int bytes = paramlist();
-	asm_call(name);
-        asm_cleanstack(bytes);
-}
+        char type;
 
-/* analisa e traduz um comando de atribuição ou chamada de procedimento */
-void assign_or_call()
-{
-        char name;
-
-        name = getname();
-        switch (symtype(name)) {
-          case ' ':
-                undefined(name);
+        asm_pop(t1);
+        type = asm_sametype(t1, t2, 0);
+        switch (type) {
+          case 'b':
+                printf("\tadd al, bl\n");
                 break;
-          case 'v':
-                assignment(name);
+          case 'w':
+                printf("\tadd ax, bx\n");
                 break;
-          case 'p':
-                docallproc(name);
-                break;
-          default:
-                printf("Identifier %c cannot be used here!", name);
-                exit(1);
+          case 'l':
+                printf("\tadd ax, bx\n");
+                printf("\tadc dx, cx\n");
                 break;
         }
+
+        return type;
 }
 
-/* analiza e traduz um bloco de comandos */
-void doblock()
+/* subtrai do valor da pilha o valor no reg. primário */
+char asm_popsub(char t1, char t2)
 {
-        while (look != 'e') {
-                assign_or_call();
-                newline();
+        char type;
+
+        asm_pop(t1);
+        type = asm_sametype(t1, t2, 0);
+        switch (type) {
+          case 'b':
+                printf("\tsub al, bl\n");
+                break;
+          case 'w':
+                printf("\tsub ax, bx\n");
+                break;
+          case 'l':
+                printf("\tsub ax, bx\n");
+                printf("\tsbb dx, cx\n");
+                break;
         }
+
+        return type;
 }
 
-/* analiza e traduz um bloco BEGIN */
-void beginblock()
+/* multiplica valor na pilha com valor no reg. primário */
+char asm_popmul(char t1, char t2)
 {
-        match('b');
-        newline();
-        doblock();
-        match('e');
-        newline();
-}
+        char type, multype;
 
-/* limpa a lista de parâmetros formais */
-void clearparams()
-{
-	int i;
-	for (i = 0; i < PARAMS_SZ; i++)
-		params[i] = 0;
-	nparams = 0;
-}
-
-/* retorna número indicando a posição do parâmetro */
-int paramnum(char name)
-{
-	return params[name - 'A'];
-}
-
-/* verifica se nome é parâmetro */
-int isparam(char name)
-{
-	return (params[name - 'A'] != 0);
-}
-
-/* adiciona parâmetro à lista */
-void addparam(char name)
-{
-	if (isparam(name))
-		duplicated(name);
-	params[name - 'A'] = ++nparams;
-}
-
-/* processa um parâmetro formal */
-void formalparam()
-{
-	addparam(getname());
-}
-
-/* processa a lista de parâmetros formais de um procedimento */
-void formallist()
-{
-	match('(');
-	if (look != ')') {
-		formalparam();
-		while (look == ',') {
-			match(',');
-			formalparam();
-		}
+	asm_pop(t1);
+        type = asm_sametype(t1, t2, 0);
+  	multype = 'l';
+	switch (type) {
+	  case 'b':
+	  	printf("\tmul bl\n");
+	  	multype = 'w';
+	  	break;
+	  case 'w':
+	  	printf("\tmul bx\n");
+	  	break;
+	  case 'l':
+	  	printf("\tcall MUL32\n");
+	  	break;
 	}
-	match(')');
+
+        return multype;
 }
 
-/* analisa e traduz uma declaração de procedimento */
-void doproc()
+/* divide valor na pilha por valor do reg. primário */
+char asm_popdiv(char t1, char t2)
 {
-	char name;
-	
-	match('p');
-	name = getname();
-        formallist();
-	newline();
-	addsymbol(name, 'p');
-        asm_procprolog(name);
-	beginblock();
-	asm_procepilog();
-        clearparams();
+        asm_pop(t1);
+
+        /* se dividendo for 32-bits divisor deve ser também */
+        if (t1 == 'l')
+                asm_convert(t2, 'l');
+
+        /* coloca operandos na ordem certa conforme o tipo */
+        if (t1 == 'l' || t2 == 'l')
+                asm_swap('l');
+        else if (t1 == 'w' || t2 == 'w')
+                asm_swap('w');
+        else
+                asm_swap('b');
+
+        /* dividendo _REAL_ sempre será LONG...
+           mas WORD se divisor for BYTE */
+        if (t2 == 'b')
+                asm_convert(t1, 'w');
+        else
+                asm_convert(t1, 'l');
+
+        /* se um dos operandos for LONG, divisão de 32-bits */
+        if (t1 == 'l' || t2 == 'l')
+                printf("\tcall DIV32\n");
+        else if (t2 == 'w') /* 32 / 16 */
+                printf("\tidiv bx\n");
+        else if (t2 == 'b') /* 16 / 8 */
+                printf("\tidiv bl\n");
+
+        /* tipo do quociente é sempre igual ao do dividendo */
+        return t1;
 }
 
-/* analiza e traduz o bloco principal do programa */
-void domain()
+/* aloca espaço de armazenamento para variável */
+void alloc(char name, char type)
 {
-	char name;
+        addsymbol(name, type);
+        asm_allocvar(name, type);
+}
+
+/* carrega variável */
+char loadvar(char name)
+{
+	char type = vartype(name);
+
+        asm_loadvar(name, type);
+
+        return type;
+}
+
+/* armazena variável */
+void storevar(char name, char srctype)
+{
+	char dsttype = vartype(name);
+	asm_convert(srctype, dsttype);
+        asm_storevar(name, dsttype);
+}
+
+/* carrega uma constante numérica */
+char loadnum(long val)
+{
+	char type;
 	
-        match('P');
-        name = getname();
-        newline();
-        if (intable(name))
-        	duplicated(name);
-        prolog();
-        beginblock();
+	if (val >= -128 && val <= 127)
+		type = 'b';
+	else if (val >= -32768 && val <= 32767)
+		type = 'w';
+	else
+		type = 'l';
+	asm_loadconst(val, type);
+
+	return type;
 }
 
 /* analiza e traduz a declaração de uma variável */
 void decl()
 {
-        match('v');
-        asm_allocvar(getname());
+        char type = look;
+        nextchar();
+        alloc(getname(), type);
 }
 
 /* analiza e traduz as declarações globais */
 void topdecls()
 {
-        while (look != '.') {
+        while (look != 'B') {
                 switch (look) {
-                  case 'v':
+                  case 'b':
+                  case 'w':
+                  case 'l':
                         decl();
                         break;
-        	  case 'p':
-        		doproc();
-        		break;
-        	  case 'P':
-        		domain();
-        		break;
                   default:
                         unrecognized(look);
                         break;
                 }
                 newline();
         }
+}
+
+/* analisa e traduz um operador unário */
+char unop()
+{
+        asm_clear();
+	return 'w';
+}
+
+/* analisa e traduz um fator matemático */
+char factor()
+{
+	char type;
+	
+	if (look == '(') {
+		match('(');
+		type = expression();
+		match(')');
+	} else if (isalpha(look))
+		type = loadvar(getname());
+	else
+		type = loadnum(getnum());
+
+	return type;
+}
+
+/* reconhece e traduz uma multiplicação */
+char multiply(char type)
+{
+	match('*');
+	return asm_popmul(type, factor());
+}
+
+/* reconhece e traduz uma multiplicação */
+char divide(char type)
+{
+	match('/');
+	return asm_popdiv(type, factor());
+}
+
+/* analisa e traduz um termo matemático */
+char term()
+{
+	char type;
+	
+	type = factor();
+	while (ismulop(look)) {
+		asm_push(type);
+		switch (look) {
+		  case '*':
+		  	type = multiply(type);
+		  	break;
+		  case '/':
+		  	type = divide(type);
+		  	break;
+		}
+	}
+	
+	return type;
+}
+
+/* reconhece e traduz uma soma */
+char add(char type)
+{
+	match('+');
+	return asm_popadd(type, term());
+}
+
+/* reconhece e traduz uma subtração */
+char subtract(char type)
+{
+	match('-');
+	return asm_popsub(type, term());
+}
+
+/* analisa e traduz uma expressão */
+char expression()
+{
+        char type;
+
+	if (isaddop(look))
+		type = unop();
+	else
+		type = term();
+	while (isaddop(look)) {
+		asm_push(type);
+		switch (look) {
+		  case '+':
+		  	type = add(type);
+		  	break;
+		  case '-':
+		  	type = subtract(type);
+		  	break;
+		}
+	}
+
+	return type;
+}
+
+/* analisa e traduz uma atribuição */
+void assignment()
+{
+	char name, type;
+	
+	name = getname();
+	match('=');
+        type = expression();
+	storevar(name, type);
+}
+
+/* analisa traduz um bloco de comandos */
+void block()
+{
+	while (look != '.') {
+		assignment();
+		newline();
+	}
 }
