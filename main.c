@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+
 #define SYMTBL_SZ 26
 #define PARAMS_SZ 26
 
